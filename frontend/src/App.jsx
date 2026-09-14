@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const PRODUCTION_API_BASE = "https://clipvideo-production.up.railway.app";
+const localHosts = new Set(["localhost", "127.0.0.1"]);
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL || "";
+const API_BASE = (configuredApiBase || (localHosts.has(window.location.hostname) ? "" : PRODUCTION_API_BASE)).replace(/\/$/, "");
 const FALLBACK_EXTENSIONS = [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpeg", ".mpg"];
 const FRAMES = [
   ["original", "Original", "Source resolution", null, null],
