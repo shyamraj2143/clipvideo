@@ -6,6 +6,7 @@ const localHosts = new Set(["localhost", "127.0.0.1"]);
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL || "";
 const API_BASE = (configuredApiBase || (localHosts.has(window.location.hostname) ? "" : PRODUCTION_API_BASE)).replace(/\/$/, "");
 const FALLBACK_EXTENSIONS = [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpeg", ".mpg"];
+const DEFAULT_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
 const FRAMES = [
   ["original", "Original", "Source resolution", null, null],
   ["instagram_reel", "Instagram Reels", "9:16 · 1080 × 1920", 1080, 1920],
@@ -28,7 +29,7 @@ const friendlyError = (error) => error?.message || "The request could not be com
 function App() {
   const input = useRef(null);
   const [file, setFile] = useState(null); const [metadata, setMetadata] = useState(null); const [dragging, setDragging] = useState(false);
-  const [config, setConfig] = useState({ max_upload_size_gb: 10, input_extensions: FALLBACK_EXTENSIONS, output_formats: [{ id: "mp4", extension: ".mp4" }] });
+  const [config, setConfig] = useState({ max_upload_size_gb: 10, upload_chunk_size: DEFAULT_UPLOAD_CHUNK_SIZE, fast_copy_workers: 4, transcode_workers: 1, ffmpeg_threads: 2, input_extensions: FALLBACK_EXTENSIONS, output_formats: [{ id: "mp4", extension: ".mp4" }] });
   const [method, setMethod] = useState("duration"); const [clipDuration, setClipDuration] = useState("60"); const [parts, setParts] = useState("5"); const [ranges, setRanges] = useState([{ start: "0", end: "" }]);
   const [numberStart, setNumberStart] = useState("1"); const [prefix, setPrefix] = useState("clip"); const [frame, setFrame] = useState("original"); const [fit, setFit] = useState("contain"); const [width, setWidth] = useState("1080"); const [height, setHeight] = useState("1920"); const [format, setFormat] = useState("mp4"); const [quality, setQuality] = useState("high");
   const [notice, setNotice] = useState(null); const [job, setJob] = useState(null); const [uploadProgress, setUploadProgress] = useState(null); const [query, setQuery] = useState(""); const [sort, setSort] = useState("number"); const [page, setPage] = useState(1);
@@ -65,17 +66,40 @@ function App() {
     if (name === "youtube") { setMethod("duration"); setClipDuration("300"); setFrame("youtube_landscape"); setFormat("mp4"); }
     if (name === "custom") { setMethod("duration"); setClipDuration("60"); setFrame("custom"); }
   }
-  function buildData() {
-    const data = new FormData(); data.append("file", file); data.append("split_mode", method); data.append("frame_preset", frame); data.append("fit_mode", fit); data.append("output_format", format); data.append("number_start", String(Number(numberStart))); data.append("filename_prefix", prefix || "clip"); data.append("video_quality", quality);
+  function buildData(includeFile = false) {
+    const data = new FormData(); if (includeFile) data.append("file", file); data.append("split_mode", method); data.append("frame_preset", frame); data.append("fit_mode", fit); data.append("output_format", format); data.append("number_start", String(Number(numberStart))); data.append("filename_prefix", prefix || "clip"); data.append("video_quality", quality);
     if (method === "duration") data.append("clip_duration", String(Number(clipDuration))); if (method === "parts") data.append("number_of_parts", String(Number(parts))); if (method === "custom") data.append("custom_clips", JSON.stringify(ranges)); if (frame === "custom") { data.append("frame_width", String(selectedWidth)); data.append("frame_height", String(selectedHeight)); } return data;
   }
-  function submit() {
+  function uploadChunk(uploadId, chunk, index, total, uploadedBefore) {
+    return new Promise((resolve, reject) => {
+      const data = new FormData(); data.append("chunk", chunk, file.name); data.append("chunk_index", String(index)); data.append("total_chunks", String(total));
+      const request = new XMLHttpRequest(); request.open("POST", `${API_BASE}/api/v1/uploads/${uploadId}/chunk`); request.responseType = "json";
+      request.upload.onprogress = event => { if (event.lengthComputable) setUploadProgress(Math.min(99, Math.round((uploadedBefore + event.loaded) * 100 / file.size))); };
+      request.onerror = () => reject({ message: "Network error. Confirm the ClipVideo API is running, then try again." });
+      request.onload = () => request.status >= 200 && request.status < 300 ? resolve(request.response || {}) : reject(request.response || { message: "Upload chunk failed." });
+      request.send(data);
+    });
+  }
+  async function submit() {
     if (errors.length) { setNotice({ type: "error", text: errors[0] }); return; }
     setNotice(null); setJob({ status: "uploading", stage: "Uploading", message: "Uploading video…", clips: [] }); setUploadProgress(0);
-    const request = new XMLHttpRequest(); request.open("POST", `${API_BASE}/api/v1/process`); request.responseType = "json"; request.upload.onprogress = event => { if (event.lengthComputable) setUploadProgress(Math.round(event.loaded * 100 / event.total)); };
-    request.onerror = () => { setJob(null); setUploadProgress(null); setNotice({ type: "error", text: "Network error. Confirm the ClipVideo API is running, then try again." }); };
-    request.onload = () => { const data = request.response || {}; if (request.status < 200 || request.status >= 300) { setJob(null); setUploadProgress(null); setNotice({ type: "error", text: friendlyError(data) }); return; } setUploadProgress(null); setJob({ ...data, status: "queued", stage: "Queued", message: "Upload complete. Preparing processing…", clips: [] }); };
-    request.send(buildData());
+    try {
+      const startResponse = await fetch(`${API_BASE}/api/v1/uploads/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, content_type: file.type || "application/octet-stream", total_size: file.size }) });
+      const startData = await startResponse.json(); if (!startResponse.ok) throw startData;
+      const chunkSize = Number(startData.chunk_size || config.upload_chunk_size || DEFAULT_UPLOAD_CHUNK_SIZE);
+      const totalChunks = Math.ceil(file.size / chunkSize); let uploaded = 0;
+      for (let index = 0; index < totalChunks; index += 1) {
+        const start = index * chunkSize; const chunk = file.slice(start, Math.min(file.size, start + chunkSize));
+        await uploadChunk(startData.upload_id, chunk, index, totalChunks, uploaded);
+        uploaded += chunk.size; setUploadProgress(Math.min(99, Math.round(uploaded * 100 / file.size)));
+      }
+      setJob({ status: "uploading", stage: "Finalizing upload", message: "Finalizing upload…", clips: [] });
+      const response = await fetch(`${API_BASE}/api/v1/uploads/${startData.upload_id}/complete`, { method: "POST", body: buildData(false) });
+      const data = await response.json(); if (!response.ok) throw data;
+      setUploadProgress(null); setJob({ ...data, status: "queued", stage: "Queued", message: "Upload complete. Preparing processing…", clips: [] });
+    } catch (error) {
+      setJob(null); setUploadProgress(null); setNotice({ type: "error", text: friendlyError(error) });
+    }
   }
   const busy = job && !["completed", "failed"].includes(job.status);
 
@@ -100,7 +124,7 @@ function App() {
       </section>}
       {file && <section className="card step"><Step number="4" title="Numbering" text="Each clip receives a predictable filename." /><div className="two-fields"><label>Starting number<input type="number" min="0" value={numberStart} onChange={event => setNumberStart(event.target.value)} /></label><label>Filename prefix<input value={prefix} maxLength="64" onChange={event => setPrefix(event.target.value)} /></label></div><p className="example-name">Example: <strong>{prefix || "clip"}_{String(Number(numberStart) || 0).padStart(3, "0")}.mp4</strong></p></section>}
       {file && <section className="card step"><Step number="5" title="Frame & format" text="A frame preset changes the video canvas. Output format is a separate setting." /><div className="frame-grid">{FRAMES.map(([id, name, detail]) => <button type="button" key={id} className={frame === id ? "frame active" : "frame"} onClick={() => setFrame(id)}><strong>{name}</strong><span>{detail}</span></button>)}</div>{frame === "custom" && <div className="two-fields custom-size"><label>Width (px)<input type="number" min="1" max="7680" value={width} onChange={event => setWidth(event.target.value)} /></label><label>Height (px)<input type="number" min="1" max="7680" value={height} onChange={event => setHeight(event.target.value)} /></label></div>}{frame !== "original" && <div className="field-line"><label htmlFor="fit">Frame fit</label><select id="fit" value={fit} onChange={event => setFit(event.target.value)}><option value="contain">Fit entire video (letterbox)</option><option value="crop">Crop to fill</option><option value="stretch">Stretch</option></select></div>}<div className="two-fields advanced"><label>Output format<select value={format} onChange={event => setFormat(event.target.value)}>{config.output_formats.map(item => <option key={item.id} value={item.id}>{item.id.toUpperCase()}</option>)}</select></label><label>Transcode quality<select value={quality} onChange={event => setQuality(event.target.value)}><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label></div></section>}
-      {file && <aside className="summary"><div><p className="eyebrow">READY TO PROCESS</p><h2>Settings summary</h2></div><dl><Summary label="Source" value={file.name} /><Summary label="Duration" value={metadata ? seconds(metadata.duration) : "Unknown"} /><Summary label="Clipping" value={method === "duration" ? `${clipDuration} sec` : method === "parts" ? `${parts} equal clips` : `${ranges.length} custom ranges`} /><Summary label="Estimated clips" value={estimated || "—"} /><Summary label="Starting number" value={numberStart} /><Summary label="Frame" value={frame === "original" ? "Original" : selectedFrame[2]} /><Summary label="Output" value={format.toUpperCase()} /></dl><button type="button" className="primary create" disabled={Boolean(errors.length) || busy} onClick={submit}>{busy ? "Processing…" : `Create${estimated ? ` ${estimated}` : ""} Clips`}</button>{errors.length > 0 && <p className="validation">{errors[0]}</p>}<p className="speed-note">Original clips use up to 50 fast-copy workers. Frame conversion uses up to 50 FFmpeg workers.</p></aside>}
+      {file && <aside className="summary"><div><p className="eyebrow">READY TO PROCESS</p><h2>Settings summary</h2></div><dl><Summary label="Source" value={file.name} /><Summary label="Duration" value={metadata ? seconds(metadata.duration) : "Unknown"} /><Summary label="Clipping" value={method === "duration" ? `${clipDuration} sec` : method === "parts" ? `${parts} equal clips` : `${ranges.length} custom ranges`} /><Summary label="Estimated clips" value={estimated || "—"} /><Summary label="Starting number" value={numberStart} /><Summary label="Frame" value={frame === "original" ? "Original" : selectedFrame[2]} /><Summary label="Output" value={format.toUpperCase()} /></dl><button type="button" className="primary create" disabled={Boolean(errors.length) || busy} onClick={submit}>{busy ? "Processing…" : `Create${estimated ? ` ${estimated}` : ""} Clips`}</button>{errors.length > 0 && <p className="validation">{errors[0]}</p>}<p className="speed-note">Laptop-safe mode: original clips use up to {config.fast_copy_workers} fast-copy workers; frame conversion uses {config.transcode_workers} worker(s) × {config.ffmpeg_threads} FFmpeg thread(s).</p></aside>}
       {job && <section className="card processing"><div><p className="eyebrow">{job.stage || "PROCESSING"}</p><h2>{job.status === "completed" ? "Clips ready" : job.status === "failed" ? "Processing failed" : job.message}</h2><p>{job.status === "uploading" ? `Uploading ${uploadProgress ?? 0}%` : job.message}</p></div>{job.status !== "failed" && <div className="progress"><div style={{ width: `${job.status === "uploading" ? uploadProgress ?? 0 : job.progress ?? 0}%` }} /></div>}{job.total_clips > 0 && <span>{job.progress_label || `${job.current_clip || 0} of ${job.total_clips} clips`}</span>}</section>}
       {job?.status === "completed" && <section className="card results"><div className="results-head"><div><p className="eyebrow">CLIPS READY</p><h2>{job.clips.length} clips generated successfully.</h2></div><a className="primary" href={`${API_BASE}${job.zip_url}`} download>Download all ZIP</a></div><div className="result-controls"><input aria-label="Search clips" placeholder="Search clips…" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} /><select aria-label="Sort clips" value={sort} onChange={event => { setSort(event.target.value); setPage(1); }}><option value="number">Sort: Number</option><option value="name">Sort: Name</option></select></div><div className="clip-list">{visibleClips.map(clip => <div className="clip" key={clip.filename}><div><strong>{clip.filename}</strong><span>{seconds(clip.start)} – {seconds(clip.end)} · {bytes(clip.size)}</span></div><a href={`${API_BASE}${clip.download_url}`} download={clip.filename}>Download</a></div>)}{!visibleClips.length && <p className="empty">No clips match your search.</p>}</div>{pages > 1 && <div className="pagination"><button disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</button><span>Page {page} of {pages}</span><button disabled={page === pages} onClick={() => setPage(page + 1)}>Next</button></div>}</section>}
       </div>

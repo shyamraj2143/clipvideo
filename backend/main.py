@@ -13,25 +13,33 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 BASE_DIR = Path(__file__).resolve().parent
 STORAGE_DIR = Path(os.getenv("STORAGE_DIR", str(BASE_DIR / "storage"))).resolve()
-UPLOAD_DIR, CLIP_DIR, ARCHIVE_DIR, TEMP_DIR = (STORAGE_DIR / "uploads", STORAGE_DIR / "clips", STORAGE_DIR / "archives", STORAGE_DIR / "temp")
+UPLOAD_DIR, CLIP_DIR, ARCHIVE_DIR, TEMP_DIR, PARTIAL_UPLOAD_DIR = (STORAGE_DIR / "uploads", STORAGE_DIR / "clips", STORAGE_DIR / "archives", STORAGE_DIR / "temp", STORAGE_DIR / "partial_uploads")
 MAX_UPLOAD_SIZE_GB = int(os.getenv("MAX_UPLOAD_SIZE_GB", "10"))
 MAX_UPLOAD_SIZE, RETENTION_HOURS, CHUNK_SIZE, MAX_CLIPS = MAX_UPLOAD_SIZE_GB * 1024**3, int(os.getenv("JOB_RETENTION_HOURS", "24")), 4 * 1024 * 1024, 10_000
-FAST_COPY_WORKERS = max(1, min(int(os.getenv("FAST_COPY_WORKERS", "50")), 50))
-TRANSCODE_WORKERS = max(1, min(int(os.getenv("TRANSCODE_WORKERS", "50")), 50))
+CLIENT_CHUNK_SIZE = max(1, min(int(os.getenv("CLIENT_CHUNK_SIZE_MB", "8")), 64)) * 1024 * 1024
+CPU_COUNT = os.cpu_count() or 2
+def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try: value = int(os.getenv(name, str(default)))
+    except ValueError: value = default
+    return max(minimum, min(value, maximum))
+MAX_PARALLEL_WORKERS = env_int("MAX_PARALLEL_WORKERS", min(8, max(1, CPU_COUNT - 1)), 1, 50)
+FAST_COPY_WORKERS = env_int("FAST_COPY_WORKERS", max(1, min(4, CPU_COUNT - 1)), 1, MAX_PARALLEL_WORKERS)
+TRANSCODE_WORKERS = env_int("TRANSCODE_WORKERS", max(1, min(2, (CPU_COUNT - 1) // 2 or 1)), 1, min(MAX_PARALLEL_WORKERS, max(1, CPU_COUNT - 1)))
+FFMPEG_THREADS = env_int("FFMPEG_THREADS", max(1, min(4, (CPU_COUNT - 1) // TRANSCODE_WORKERS or 1)), 1, max(1, CPU_COUNT - 1))
 TRANSCODE_PRESET = os.getenv("TRANSCODE_PRESET", "superfast").lower()
 if TRANSCODE_PRESET not in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium"}: TRANSCODE_PRESET = "superfast"
 TRANSCODE_STRATEGY = os.getenv("TRANSCODE_STRATEGY", "parallel").lower()
 if TRANSCODE_STRATEGY not in {"parallel", "singlepass"}: TRANSCODE_STRATEGY = "parallel"
 VIDEO_ENCODER = os.getenv("VIDEO_ENCODER", "auto").lower()
 if VIDEO_ENCODER not in {"auto", "libx264", "h264_qsv", "h264_nvenc", "h264_amf"}: VIDEO_ENCODER = "auto"
-for directory in (UPLOAD_DIR, CLIP_DIR, ARCHIVE_DIR, TEMP_DIR): directory.mkdir(parents=True, exist_ok=True)
+for directory in (UPLOAD_DIR, CLIP_DIR, ARCHIVE_DIR, TEMP_DIR, PARTIAL_UPLOAD_DIR): directory.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("clipvideo")
 
@@ -51,6 +59,7 @@ origins = list(dict.fromkeys(item.strip() for item in configured_origins.split("
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False, allow_methods=["GET", "POST", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 JOBS: dict[str, dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
+UPLOADS_LOCK = threading.Lock()
 
 def api_error(code: str, message: str, status: int = 400) -> HTTPException: return HTTPException(status, {"error": code, "message": message})
 @app.exception_handler(HTTPException)
@@ -61,6 +70,10 @@ def binary(name: str) -> str:
     path = shutil.which(name)
     if not path: raise RuntimeError(f"{name} is not installed or unavailable on PATH.")
     return path
+def ffmpeg_process_options() -> dict[str, Any]:
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)}
+    return {}
 def available_encoders() -> set[str]:
     result = subprocess.run([binary("ffmpeg"), "-hide_banner", "-encoders"], capture_output=True, text=True, check=False)
     return {line.split()[1] for line in result.stdout.splitlines() if len(line.split()) > 1 and line.split()[1] in {"h264_qsv", "h264_nvenc", "h264_amf"}}
@@ -92,6 +105,55 @@ async def stream_upload(upload: UploadFile, destination: Path) -> int:
         raise
     finally: await upload.close()
     if not total: raise api_error("INVALID_FILE", "The selected file is empty. Choose a video file with content.")
+    return total
+
+def validate_upload_file(filename: str | None, content_type: str | None, total_size: int | None = None) -> str:
+    extension = Path(filename or "").suffix.lower()
+    if extension not in INPUT_FORMATS: raise api_error("INVALID_FILE", "Video format is not supported. Choose MP4, MOV, MKV, AVI, WEBM, M4V, MPEG, or MPG.")
+    if content_type and not (content_type.startswith("video/") or content_type == "application/octet-stream"): raise api_error("INVALID_FILE", "The selected file is not a video. Choose a supported video file.")
+    if total_size is not None:
+        if total_size <= 0: raise api_error("INVALID_FILE", "The selected file is empty. Choose a video file with content.")
+        if total_size > MAX_UPLOAD_SIZE: raise api_error("FILE_TOO_LARGE", f"The maximum upload size is {MAX_UPLOAD_SIZE_GB} GB.", 413)
+    return extension
+def upload_session_dir(upload_id: str) -> Path:
+    try: safe_id = str(uuid.UUID(upload_id))
+    except (ValueError, TypeError): raise api_error("UPLOAD_NOT_FOUND", "This upload session no longer exists. Start the upload again.", 404)
+    return PARTIAL_UPLOAD_DIR / safe_id
+def upload_meta_path(upload_id: str) -> Path: return upload_session_dir(upload_id) / "metadata.json"
+def save_upload_meta(upload_id: str, metadata: dict[str, Any]):
+    directory = upload_session_dir(upload_id); directory.mkdir(parents=True, exist_ok=True)
+    temporary = directory / "metadata.tmp"; temporary.write_text(json.dumps(metadata), encoding="utf-8"); temporary.replace(directory / "metadata.json")
+def load_upload_meta(upload_id: str) -> dict[str, Any]:
+    path = upload_meta_path(upload_id)
+    if not path.is_file(): raise api_error("UPLOAD_NOT_FOUND", "This upload session no longer exists. Start the upload again.", 404)
+    try: return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error: raise api_error("UPLOAD_CORRUPT", "Upload metadata is invalid. Start the upload again.", 409) from error
+def enqueue_job(background_tasks: BackgroundTasks, job_id: str, source: Path, settings: dict[str, Any], size: int) -> dict[str, str]:
+    with JOBS_LOCK: JOBS[job_id] = {"job_id": job_id, "status": "queued", "stage": "Queued", "progress": 0, "current_clip": 0, "total_clips": 0, "message": "Upload complete. Preparing processing…", "clips": [], "zip_url": "", "file_size": size}
+    background_tasks.add_task(process_job, job_id, source, settings)
+    return {"job_id": job_id, "status": "queued", "status_url": f"/api/v1/status/{job_id}"}
+def assemble_chunked_upload(upload_id: str, target: Path) -> int:
+    metadata, directory = load_upload_meta(upload_id), upload_session_dir(upload_id)
+    chunks_dir = directory / "chunks"
+    total_chunks, expected_size = int(metadata.get("total_chunks") or 0), int(metadata.get("total_size") or 0)
+    if total_chunks <= 0: raise api_error("UPLOAD_INCOMPLETE", "No uploaded chunks were found. Upload the video again.", 409)
+    missing = [index for index in range(total_chunks) if not (chunks_dir / f"{index:06d}.part").is_file()]
+    if missing: raise api_error("UPLOAD_INCOMPLETE", "Some video chunks are missing. Upload the video again.", 409)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    total = 0
+    try:
+        with target.open("wb") as output:
+            for index in range(total_chunks):
+                part = chunks_dir / f"{index:06d}.part"
+                total += part.stat().st_size
+                if total > MAX_UPLOAD_SIZE: raise api_error("FILE_TOO_LARGE", f"The maximum upload size is {MAX_UPLOAD_SIZE_GB} GB.", 413)
+                with part.open("rb") as input_file: shutil.copyfileobj(input_file, output, CHUNK_SIZE)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    if total != expected_size:
+        target.unlink(missing_ok=True)
+        raise api_error("UPLOAD_INCOMPLETE", "Uploaded video size does not match the original file. Upload the video again.", 409)
     return total
 
 def probe(path: Path) -> dict[str, Any]:
@@ -142,12 +204,12 @@ def filter_for(width: int, height: int, fit: str) -> str:
     if fit == "crop": return f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
     return f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
 def run(command: list[str]):
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(command, capture_output=True, text=True, check=False, **ffmpeg_process_options())
     if result.returncode:
         logger.error("ffmpeg %s: %s", result.returncode, result.stderr[-4000:]); raise RuntimeError("FFmpeg could not generate this clip. Check that the source video and selected settings are compatible.")
 def run_with_progress(command: list[str], job_id: str, duration: float, clip_duration: float, total_clips: int):
     progress_command = [*command[:-1], "-progress", "pipe:1", "-nostats", command[-1]]
-    process = subprocess.Popen(progress_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    process = subprocess.Popen(progress_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **ffmpeg_process_options())
     stderr, last_update = "", 0.0
     try:
         for line in process.stdout or []:
@@ -171,7 +233,7 @@ def make_clip(source: Path, target: Path, start: float, end: float, settings: di
     command = [binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-ss", str(start), "-i", str(source), "-t", str(end - start), "-map", "0:v:0?", "-map", "0:a?"]
     fast = width is None and height is None
     if fast: command += ["-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart"]
-    else: command += ["-vf", filter_for(width, height, settings["fit_mode"]), "-c:v", "libx264", "-preset", "veryfast", "-crf", str(settings["crf"]), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart"]
+    else: command += ["-vf", filter_for(width, height, settings["fit_mode"]), "-c:v", "libx264", "-preset", TRANSCODE_PRESET, "-crf", str(settings["crf"]), "-threads", str(FFMPEG_THREADS), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart"]
     run(command + [str(target)])
     if not target.is_file() or target.stat().st_size == 0: raise RuntimeError("FFmpeg finished without creating a usable clip.")
     return fast
@@ -179,7 +241,7 @@ def add_encoder_options(command: list[str], encoder: str, settings: dict[str, An
     if encoder == "h264_qsv": return command + ["-c:v", encoder, "-global_quality", str(settings["crf"])]
     if encoder == "h264_nvenc": return command + ["-c:v", encoder, "-preset", "p1", "-cq", str(settings["crf"]), "-b:v", "0"]
     if encoder == "h264_amf": return command + ["-c:v", encoder, "-quality", "speed", "-rc", "cqp", "-qp_i", str(settings["crf"]), "-qp_p", str(settings["crf"])]
-    return command + ["-c:v", "libx264", "-preset", TRANSCODE_PRESET, "-crf", str(settings["crf"]), "-threads", "0"]
+    return command + ["-c:v", "libx264", "-preset", TRANSCODE_PRESET, "-crf", str(settings["crf"]), "-threads", str(FFMPEG_THREADS)]
 def audio_options(copy_audio: bool) -> list[str]:
     return ["-pix_fmt", "yuv420p", "-c:a", "copy"] if copy_audio else ["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k"]
 def transcode_clip_command(source: Path, target: Path, start: float, end: float, settings: dict[str, Any], width: int, height: int, encoder: str, copy_audio: bool) -> list[str]:
@@ -269,7 +331,7 @@ def parallel_transcode_clips(source: Path, output: Path, settings: dict[str, Any
     return [clip_map[index] for index in range(len(ranges))]
 def cleanup():
     cutoff = time.time() - RETENTION_HOURS * 3600
-    for base in (UPLOAD_DIR, CLIP_DIR, ARCHIVE_DIR, TEMP_DIR):
+    for base in (UPLOAD_DIR, CLIP_DIR, ARCHIVE_DIR, TEMP_DIR, PARTIAL_UPLOAD_DIR):
         for path in base.iterdir():
             if path.is_dir() and path.stat().st_mtime < cutoff: shutil.rmtree(path, ignore_errors=True)
 
@@ -369,21 +431,59 @@ def root(): return {"success": True, "app": "ClipVideo", "version": app.version}
 @app.get("/api/v1/health")
 def health(): return {"success": True, "status": "healthy", "ffmpeg_available": bool(shutil.which("ffmpeg")), "ffprobe_available": bool(shutil.which("ffprobe"))}
 @app.get("/api/v1/config")
-def config(): return {"max_upload_size_gb": MAX_UPLOAD_SIZE_GB, "retention_hours": RETENTION_HOURS, "input_extensions": sorted(INPUT_FORMATS), "output_formats": [{"id": key, "extension": value["extension"], "mime": value["mime"]} for key, value in OUTPUT_FORMATS.items()]}
+def config(): return {"max_upload_size_gb": MAX_UPLOAD_SIZE_GB, "upload_chunk_size": CLIENT_CHUNK_SIZE, "fast_copy_workers": FAST_COPY_WORKERS, "transcode_workers": TRANSCODE_WORKERS, "ffmpeg_threads": FFMPEG_THREADS, "retention_hours": RETENTION_HOURS, "input_extensions": sorted(INPUT_FORMATS), "output_formats": [{"id": key, "extension": value["extension"], "mime": value["mime"]} for key, value in OUTPUT_FORMATS.items()]}
+@app.post("/api/v1/uploads/start", status_code=201)
+async def start_upload(payload: dict[str, Any] = Body(...)):
+    filename, content_type = str(payload.get("filename") or ""), str(payload.get("content_type") or "application/octet-stream")
+    try: total_size = int(payload.get("total_size") or 0)
+    except (TypeError, ValueError): total_size = 0
+    extension = validate_upload_file(filename, content_type, total_size)
+    upload_id = str(uuid.uuid4())
+    (upload_session_dir(upload_id) / "chunks").mkdir(parents=True, exist_ok=True)
+    save_upload_meta(upload_id, {"upload_id": upload_id, "filename": Path(filename).name or f"source{extension}", "extension": extension, "content_type": content_type, "total_size": total_size, "received": [], "created_at": time.time(), "updated_at": time.time()})
+    return {"upload_id": upload_id, "chunk_size": CLIENT_CHUNK_SIZE}
+@app.post("/api/v1/uploads/{upload_id}/chunk")
+async def upload_chunk(upload_id: str, chunk: UploadFile = File(...), chunk_index: int = Form(...), total_chunks: int = Form(...)):
+    metadata, directory = load_upload_meta(upload_id), upload_session_dir(upload_id)
+    if total_chunks <= 0 or chunk_index < 0 or chunk_index >= total_chunks: raise api_error("INVALID_CHUNK", "Upload chunk index is invalid.")
+    chunks_dir = directory / "chunks"; chunks_dir.mkdir(parents=True, exist_ok=True)
+    part = chunks_dir / f"{chunk_index:06d}.part"
+    size = await stream_upload(chunk, part)
+    with UPLOADS_LOCK:
+        metadata = load_upload_meta(upload_id)
+        previous_total_chunks = int(metadata.get("total_chunks") or total_chunks)
+        if previous_total_chunks != total_chunks:
+            part.unlink(missing_ok=True)
+            raise api_error("INVALID_CHUNK", "Upload chunk count changed during upload. Start again.", 409)
+        received = {int(item) for item in metadata.get("received", [])}
+        received.add(chunk_index)
+        uploaded_bytes = sum(path.stat().st_size for path in chunks_dir.glob("*.part"))
+        if uploaded_bytes > int(metadata.get("total_size") or 0):
+            part.unlink(missing_ok=True)
+            raise api_error("UPLOAD_TOO_LARGE", "Uploaded chunks exceed the original file size. Start again.", 413)
+        metadata.update({"received": sorted(received), "total_chunks": total_chunks, "updated_at": time.time()})
+        save_upload_meta(upload_id, metadata)
+    return {"upload_id": upload_id, "chunk_index": chunk_index, "chunk_size": size, "received_chunks": len(received), "total_chunks": total_chunks, "uploaded_bytes": uploaded_bytes}
+@app.post("/api/v1/uploads/{upload_id}/complete", status_code=202)
+async def complete_upload(background_tasks: BackgroundTasks, upload_id: str, split_mode: str = Form("duration"), clip_duration: float | None = Form(None), number_of_parts: int | None = Form(None), frame_preset: str = Form("original"), frame_width: int | None = Form(None), frame_height: int | None = Form(None), fit_mode: str = Form("contain"), output_format: str = Form("mp4"), number_start: int = Form(1), filename_prefix: str = Form("clip"), custom_clips: str | None = Form(None), video_quality: str = Form("high")):
+    metadata = load_upload_meta(upload_id)
+    settings = validate(split_mode, clip_duration, number_of_parts, frame_preset, frame_width, frame_height, fit_mode, output_format.lower(), number_start, filename_prefix, custom_clips, video_quality)
+    job_id = str(uuid.uuid4()); directory = UPLOAD_DIR / job_id; source = directory / f"source{metadata['extension']}"
+    try: size = assemble_chunked_upload(upload_id, source)
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    shutil.rmtree(upload_session_dir(upload_id), ignore_errors=True)
+    return enqueue_job(background_tasks, job_id, source, settings, size)
 @app.post("/api/v1/process", status_code=202)
 async def process_video(background_tasks: BackgroundTasks, file: UploadFile = File(...), split_mode: str = Form("duration"), clip_duration: float | None = Form(None), number_of_parts: int | None = Form(None), frame_preset: str = Form("original"), frame_width: int | None = Form(None), frame_height: int | None = Form(None), fit_mode: str = Form("contain"), output_format: str = Form("mp4"), number_start: int = Form(1), filename_prefix: str = Form("clip"), custom_clips: str | None = Form(None), video_quality: str = Form("high")):
-    extension = Path(file.filename or "").suffix.lower()
-    if extension not in INPUT_FORMATS: raise api_error("INVALID_FILE", "Video format is not supported. Choose MP4, MOV, MKV, AVI, WEBM, M4V, MPEG, or MPG.")
-    if file.content_type and not (file.content_type.startswith("video/") or file.content_type == "application/octet-stream"): raise api_error("INVALID_FILE", "The selected file is not a video. Choose a supported video file.")
+    extension = validate_upload_file(file.filename, file.content_type)
     settings = validate(split_mode, clip_duration, number_of_parts, frame_preset, frame_width, frame_height, fit_mode, output_format.lower(), number_start, filename_prefix, custom_clips, video_quality)
     job_id = str(uuid.uuid4()); directory = UPLOAD_DIR / job_id; directory.mkdir(parents=True); source = directory / f"source{extension}"
-    with JOBS_LOCK: JOBS[job_id] = {"job_id": job_id, "status": "uploading", "stage": "Uploading", "progress": 0, "current_clip": 0, "total_clips": 0, "message": "Uploading video…", "clips": [], "zip_url": ""}
     try: size = await stream_upload(file, source)
     except Exception:
-        with JOBS_LOCK: JOBS.pop(job_id, None)
         shutil.rmtree(directory, ignore_errors=True); raise
-    update_job(job_id, status="queued", stage="Queued", message="Upload complete. Preparing processing…", file_size=size); background_tasks.add_task(process_job, job_id, source, settings)
-    return {"job_id": job_id, "status": "queued", "status_url": f"/api/v1/status/{job_id}"}
+    return enqueue_job(background_tasks, job_id, source, settings, size)
 @app.get("/api/v1/status/{job_id}")
 def status(job_id: str):
     job = get_job(job_id)
