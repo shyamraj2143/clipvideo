@@ -41,8 +41,13 @@ OUTPUT_FORMATS = {"mp4": {"extension": ".mp4", "mime": "video/mp4", "video_codec
 FRAME_PRESETS = {"original": None, "instagram_reel": (1080, 1920, "9:16"), "youtube_shorts": (1080, 1920, "9:16"), "tiktok": (1080, 1920, "9:16"), "instagram_post": (1080, 1080, "1:1"), "instagram_portrait": (1080, 1350, "4:5"), "youtube_landscape": (1920, 1080, "16:9")}
 
 app = FastAPI(title="ClipVideo API", version="6.0.0")
-DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,https://clipvideo.site.je,https://www.clipvideo.site.je,http://clipvideo.site.je,http://www.clipvideo.site.je"
-origins = [item.strip() for item in os.getenv("CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",") if item.strip()]
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "https://clipvideo.site.je,https://www.clipvideo.site.je,"
+    "http://clipvideo.site.je,http://www.clipvideo.site.je"
+)
+configured_origins = f"{DEFAULT_CORS_ORIGINS},{os.getenv('CORS_ORIGINS', '')}"
+origins = list(dict.fromkeys(item.strip() for item in configured_origins.split(",") if item.strip()))
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False, allow_methods=["GET", "POST", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 JOBS: dict[str, dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
