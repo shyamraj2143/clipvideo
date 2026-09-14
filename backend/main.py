@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 BASE_DIR = Path(__file__).resolve().parent
-STORAGE_DIR = BASE_DIR / "storage"
+STORAGE_DIR = Path(os.getenv("STORAGE_DIR", str(BASE_DIR / "storage"))).resolve()
 UPLOAD_DIR, CLIP_DIR, ARCHIVE_DIR, TEMP_DIR = (STORAGE_DIR / "uploads", STORAGE_DIR / "clips", STORAGE_DIR / "archives", STORAGE_DIR / "temp")
 MAX_UPLOAD_SIZE_GB = int(os.getenv("MAX_UPLOAD_SIZE_GB", "10"))
 MAX_UPLOAD_SIZE, RETENTION_HOURS, CHUNK_SIZE, MAX_CLIPS = MAX_UPLOAD_SIZE_GB * 1024**3, int(os.getenv("JOB_RETENTION_HOURS", "24")), 4 * 1024 * 1024, 10_000

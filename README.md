@@ -52,6 +52,7 @@ VITE_API_BASE_URL=https://your-api.example.com
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `STORAGE_DIR` | `backend/storage` | Runtime uploads, clips, temporary files, and ZIP archives. |
 | `MAX_UPLOAD_SIZE_GB` | `10` | Maximum streamed upload size. |
 | `JOB_RETENTION_HOURS` | `24` | Generated clip/archive lifetime. |
 | `FAST_COPY_WORKERS` | `50` | Parallel safe stream-copy processes (1–50). |
@@ -61,6 +62,37 @@ VITE_API_BASE_URL=https://your-api.example.com
 | `VIDEO_ENCODER` | `auto` | `auto`, `h264_qsv`, `h264_nvenc`, `h264_amf`, or `libx264`. Hardware failure safely retries with `libx264`. |
 | `CORS_ORIGINS` | local Vite origins | Comma-separated allowed browser origins. |
 | `LOG_LEVEL` | `INFO` | Backend log level. |
+
+## Railway backend deployment
+
+This repository includes a root `Dockerfile` for Railway. It installs Python dependencies, installs FFmpeg/FFprobe, copies `backend/`, and starts FastAPI on Railway's `$PORT`.
+
+1. Push this repository to GitHub.
+2. In Railway, deploy the GitHub repo. Keep the source root as the repository root so Railway detects the root `Dockerfile`.
+3. In the backend service Variables tab, set:
+
+```env
+CORS_ORIGINS=https://clipvideo.site.je,https://www.clipvideo.site.je
+STORAGE_DIR=/app/storage
+MAX_UPLOAD_SIZE_GB=10
+JOB_RETENTION_HOURS=24
+FAST_COPY_WORKERS=50
+TRANSCODE_WORKERS=50
+TRANSCODE_STRATEGY=parallel
+VIDEO_ENCODER=libx264
+TRANSCODE_PRESET=ultrafast
+LOG_LEVEL=INFO
+```
+
+4. Add a Railway volume to the backend service with mount path `/app/storage`.
+5. Open the Railway backend URL and test `/api/v1/health`.
+6. In the deployed frontend, set `VITE_API_BASE_URL` to the Railway backend URL, for example:
+
+```env
+VITE_API_BASE_URL=https://clipvideo-production.up.railway.app
+```
+
+Then redeploy the frontend.
 
 ## API
 
