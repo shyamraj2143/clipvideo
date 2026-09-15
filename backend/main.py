@@ -66,6 +66,10 @@ def api_error(code: str, message: str, status: int = 400) -> HTTPException: retu
 async def http_error(_: Request, exc: HTTPException): return JSONResponse(status_code=exc.status_code, content=exc.detail if isinstance(exc.detail, dict) else {"error": "REQUEST_ERROR", "message": str(exc.detail)})
 @app.exception_handler(RequestValidationError)
 async def request_error(_: Request, exc: RequestValidationError): return JSONResponse(status_code=422, content={"error": "INVALID_REQUEST", "message": "The upload request contains missing or invalid fields.", "fields": [".".join(map(str, error["loc"])) for error in exc.errors()]})
+@app.exception_handler(Exception)
+async def server_error(_: Request, exc: Exception):
+    logger.exception("Unhandled API error")
+    return JSONResponse(status_code=500, content={"error": "SERVER_ERROR", "message": "The server hit a temporary error. Retry the request."})
 def binary(name: str) -> str:
     path = shutil.which(name)
     if not path: raise RuntimeError(f"{name} is not installed or unavailable on PATH.")
@@ -122,7 +126,21 @@ def upload_session_dir(upload_id: str) -> Path:
 def upload_meta_path(upload_id: str) -> Path: return upload_session_dir(upload_id) / "metadata.json"
 def save_upload_meta(upload_id: str, metadata: dict[str, Any]):
     directory = upload_session_dir(upload_id); directory.mkdir(parents=True, exist_ok=True)
-    temporary = directory / "metadata.tmp"; temporary.write_text(json.dumps(metadata), encoding="utf-8"); temporary.replace(directory / "metadata.json")
+    target, payload, last_error = directory / "metadata.json", json.dumps(metadata), None
+    for attempt in range(12):
+        temporary = directory / f"metadata.{uuid.uuid4().hex}.tmp"
+        try:
+            temporary.write_text(payload, encoding="utf-8")
+            temporary.replace(target)
+            return
+        except PermissionError as error:
+            last_error = error
+            temporary.unlink(missing_ok=True)
+            time.sleep(0.05 * (attempt + 1))
+        except OSError as error:
+            temporary.unlink(missing_ok=True)
+            raise api_error("UPLOAD_METADATA_ERROR", "Upload metadata could not be saved. Retry the upload.", 500) from error
+    raise api_error("UPLOAD_METADATA_LOCKED", "Upload metadata is temporarily locked. Retry the upload.", 503) from last_error
 def load_upload_meta(upload_id: str) -> dict[str, Any]:
     path = upload_meta_path(upload_id)
     if not path.is_file(): raise api_error("UPLOAD_NOT_FOUND", "This upload session no longer exists. Start the upload again.", 404)

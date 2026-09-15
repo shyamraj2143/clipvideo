@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 const PRODUCTION_API_BASE = "https://clipvideo-production.up.railway.app";
+const LOCAL_API_BASE = "http://127.0.0.1:8000";
 const localHosts = new Set(["localhost", "127.0.0.1"]);
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL || "";
-const API_BASE = (configuredApiBase || (localHosts.has(window.location.hostname) ? "" : PRODUCTION_API_BASE)).replace(/\/$/, "");
+const API_BASE = (configuredApiBase || (localHosts.has(window.location.hostname) ? LOCAL_API_BASE : PRODUCTION_API_BASE)).replace(/\/$/, "");
 const FALLBACK_EXTENSIONS = [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpeg", ".mpg"];
 const DEFAULT_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
+const UPLOAD_CHUNK_RETRIES = 4;
 const FRAMES = [
   ["original", "Original", "Source resolution", null, null],
   ["instagram_reel", "Instagram Reels", "9:16 · 1080 × 1920", 1080, 1920],
@@ -25,6 +27,7 @@ const seconds = (value) => {
   return h ? `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
 const friendlyError = (error) => error?.message || "The request could not be completed. Check your connection and try again.";
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function App() {
   const input = useRef(null);
@@ -80,6 +83,18 @@ function App() {
       request.send(data);
     });
   }
+  async function uploadChunkWithRetry(uploadId, chunk, index, total, uploadedBefore) {
+    let lastError = null;
+    for (let attempt = 0; attempt <= UPLOAD_CHUNK_RETRIES; attempt += 1) {
+      try { return await uploadChunk(uploadId, chunk, index, total, uploadedBefore); }
+      catch (error) {
+        lastError = error;
+        if (attempt === UPLOAD_CHUNK_RETRIES) break;
+        await wait(500 * (attempt + 1));
+      }
+    }
+    throw lastError || { message: "Upload chunk failed." };
+  }
   async function submit() {
     if (errors.length) { setNotice({ type: "error", text: errors[0] }); return; }
     setNotice(null); setJob({ status: "uploading", stage: "Uploading", message: "Uploading video…", clips: [] }); setUploadProgress(0);
@@ -90,7 +105,7 @@ function App() {
       const totalChunks = Math.ceil(file.size / chunkSize); let uploaded = 0;
       for (let index = 0; index < totalChunks; index += 1) {
         const start = index * chunkSize; const chunk = file.slice(start, Math.min(file.size, start + chunkSize));
-        await uploadChunk(startData.upload_id, chunk, index, totalChunks, uploaded);
+        await uploadChunkWithRetry(startData.upload_id, chunk, index, totalChunks, uploaded);
         uploaded += chunk.size; setUploadProgress(Math.min(99, Math.round(uploaded * 100 / file.size)));
       }
       setJob({ status: "uploading", stage: "Finalizing upload", message: "Finalizing upload…", clips: [] });
