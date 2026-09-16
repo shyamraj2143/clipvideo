@@ -12,20 +12,56 @@
   <body>
     <div id="root"></div>
 
-    <section id="social-publishing" class="social-embed-section" aria-labelledby="social-publishing-title">
-      <div class="social-embed-heading">
-        <div>
-          <span class="social-embed-eyebrow">CLIPVIDEO · SOCIAL PUBLISHING</span>
-          <h2 id="social-publishing-title">Schedule and publish your clips</h2>
-          <p>Keep the existing ClipVideo workflow. Use this separate section to connect social accounts, choose posts per day and exact times, write captions, and manage the server-side publishing queue.</p>
-        </div>
-        <a href="/social/" target="_blank" rel="noreferrer" class="social-embed-open">Open full Social Hub ↗</a>
-      </div>
-      <div class="social-embed-frame-wrap">
-        <iframe id="social-hub-frame" title="ClipVideo Social Publishing Hub" src="/social/?embedded=1" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+    <section id="social-publishing" class="social-inline" aria-labelledby="social-publishing-title">
+      <div class="social-shell">
+        <header class="social-hero">
+          <div>
+            <div class="social-eyebrow">CLIPVIDEO · SOCIAL PUBLISHING</div>
+            <h2 id="social-publishing-title">Schedule once.<br /><span>Publish automatically.</span></h2>
+            <p>Connect your social accounts, choose how many clips go out each day, set exact times, write captions, and let the server keep working after you close the website.</p>
+          </div>
+        </header>
+
+        <section class="social-grid social-providers" id="providers"></section>
+
+        <section class="social-panel">
+          <div class="social-panel-head"><div><div class="social-eyebrow">01 · SOURCE</div><h3>Load finished clips</h3></div><span class="social-muted">Use a completed ClipVideo job</span></div>
+          <div class="social-row">
+            <label>Job ID<input id="jobId" placeholder="e.g. 8c4b..." /></label>
+            <button id="loadJob" class="social-primary">Load clips</button>
+          </div>
+          <div id="jobInfo" class="social-status"></div>
+          <div id="clips" class="social-clip-list"></div>
+        </section>
+
+        <section class="social-panel">
+          <div class="social-panel-head"><div><div class="social-eyebrow">02 · SCHEDULE</div><h3>Build your posting plan</h3></div><span class="social-muted">Per day + exact times</span></div>
+          <div class="social-form-grid">
+            <label>Start date<input id="startDate" type="date" /></label>
+            <label>Posts per day<input id="perDay" type="number" min="1" max="24" value="3" /></label>
+            <label>Timezone<select id="timezone"></select></label>
+          </div>
+          <div class="social-times" id="times"></div>
+          <div class="social-inline-actions"><button id="addTime" class="social-secondary">+ Add posting time</button><button id="autoTimes" class="social-secondary">Auto-space times</button></div>
+
+          <div class="social-form-grid social-two">
+            <label>Caption template<textarea id="caption" rows="4">Part {clip_number} of {total_clips} 🔥\n\n#reels #shorts #ClipVideo</textarea></label>
+            <label>YouTube title template<textarea id="title" rows="4">Clip {clip_number} of {total_clips}</textarea></label>
+          </div>
+
+          <div class="social-preview" id="preview"></div>
+          <button id="schedule" class="social-primary social-wide">Schedule selected clips</button>
+          <div id="result" class="social-status"></div>
+        </section>
+
+        <section class="social-panel">
+          <div class="social-panel-head"><div><div class="social-eyebrow">03 · QUEUE</div><h3>Server-side queue</h3></div><button id="refresh" class="social-secondary">Refresh</button></div>
+          <div id="queue" class="social-queue"></div>
+        </section>
       </div>
     </section>
 
+    <script src="/social/app.js" defer></script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
