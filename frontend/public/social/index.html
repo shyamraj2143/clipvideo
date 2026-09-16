@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipVideo Social Hub</title>
+  <link rel="stylesheet" href="/social/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">CLIPVIDEO · SOCIAL HUB</div>
+        <h1>Schedule once.<br><span>Publish automatically.</span></h1>
+        <p>Connect your social accounts, choose how many clips go out each day, set exact times, write a caption template, and let the server keep working after you close the website.</p>
+      </div>
+      <a class="back" href="/">← Back to ClipVideo</a>
+    </header>
+
+    <section class="grid providers" id="providers"></section>
+
+    <section class="panel">
+      <div class="panel-head"><div><div class="eyebrow">01 · SOURCE</div><h2>Load finished clips</h2></div><span class="muted">Use a completed ClipVideo job</span></div>
+      <div class="row">
+        <label>Job ID<input id="jobId" placeholder="e.g. 8c4b..." /></label>
+        <button id="loadJob" class="primary">Load clips</button>
+      </div>
+      <div id="jobInfo" class="status"></div>
+      <div id="clips" class="clip-list"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><div class="eyebrow">02 · SCHEDULE</div><h2>Build your posting plan</h2></div><span class="muted">Per day + exact times</span></div>
+      <div class="form-grid">
+        <label>Start date<input id="startDate" type="date" /></label>
+        <label>Posts per day<input id="perDay" type="number" min="1" max="24" value="3" /></label>
+        <label>Timezone<select id="timezone"></select></label>
+      </div>
+      <div class="times" id="times"></div>
+      <div class="inline-actions"><button id="addTime" class="secondary">+ Add posting time</button><button id="autoTimes" class="secondary">Auto-space times</button></div>
+
+      <div class="form-grid two">
+        <label>Caption template<textarea id="caption" rows="4">Part {clip_number} of {total_clips} 🔥\n\n#reels #shorts #ClipVideo</textarea></label>
+        <label>YouTube title template<textarea id="title" rows="4">Clip {clip_number} of {total_clips}</textarea></label>
+      </div>
+
+      <div class="preview" id="preview"></div>
+      <button id="schedule" class="primary wide">Schedule selected clips</button>
+      <div id="result" class="status"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><div class="eyebrow">03 · QUEUE</div><h2>Server-side queue</h2></div><button id="refresh" class="secondary">Refresh</button></div>
+      <div id="queue" class="queue"></div>
+    </section>
+  </div>
+  <script src="/social/app.js" defer></script>
+</body>
+</html>
