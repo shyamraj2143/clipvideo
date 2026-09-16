@@ -1,1 +1,74 @@
-:root{--embed-bg:#0b0d11;--embed-card:#12161d;--embed-border:rgba(255,255,255,.09);--embed-text:#f4f7fb;--embed-muted:#9da7b5;--embed-accent:#7c8cff}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--embed-bg);color:var(--embed-text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.social-embed-section{width:min(1180px,calc(100% - 32px));margin:72px auto 48px;padding:28px;border:1px solid var(--embed-border);border-radius:28px;background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.015));box-shadow:0 24px 80px rgba(0,0,0,.25);scroll-margin-top:24px}.social-embed-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:20px}.social-embed-eyebrow{display:inline-block;font-size:12px;font-weight:800;letter-spacing:.14em;color:var(--embed-accent);margin-bottom:8px}.social-embed-heading h2{margin:0;font-size:clamp(28px,4vw,42px);line-height:1.05;letter-spacing:-.03em}.social-embed-heading p{max-width:760px;margin:12px 0 0;color:var(--embed-muted);line-height:1.65;font-size:15px}.social-embed-open{flex:none;padding:11px 15px;border:1px solid var(--embed-border);border-radius:12px;color:var(--embed-text);text-decoration:none;background:rgba(255,255,255,.045);font-weight:700;white-space:nowrap}.social-embed-open:hover{background:rgba(255,255,255,.08)}.social-embed-frame-wrap{overflow:hidden;border:1px solid var(--embed-border);border-radius:22px;background:#0b0d11}.social-embed-frame-wrap iframe{display:block;width:100%;height:1500px;border:0;background:#0b0d11}@media(max-width:720px){.social-embed-section{width:calc(100% - 20px);margin:40px auto 24px;padding:16px;border-radius:20px}.social-embed-heading{display:block}.social-embed-open{display:inline-block;margin-top:16px}.social-embed-frame-wrap{border-radius:16px}.social-embed-frame-wrap iframe{height:1900px}}
+#social-publishing{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef1ff;line-height:1.45;font-synthesis:none;width:min(1180px,calc(100% - 32px));margin:72px auto 48px;scroll-margin-top:24px}
+#social-publishing,#social-publishing *{box-sizing:border-box}
+#social-publishing .social-shell{width:100%}
+#social-publishing .social-hero{display:flex;justify-content:space-between;gap:32px;align-items:flex-start;margin-bottom:28px}
+#social-publishing .social-eyebrow{font-size:11px;letter-spacing:.16em;color:#9ba5c7;font-weight:800}
+#social-publishing .social-hero h2{font-size:clamp(38px,6vw,64px);line-height:.98;margin:10px 0 18px;letter-spacing:-.045em}
+#social-publishing .social-hero h2 span{color:#8eaaff}
+#social-publishing .social-hero p{max-width:760px;color:#aab1c8;font-size:16px;margin:0}
+#social-publishing .social-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}
+#social-publishing .provider{background:#111520;border:1px solid #252c40;border-radius:18px;padding:18px;min-height:150px;box-shadow:0 12px 40px #0003}
+#social-publishing .provider-title{display:flex;align-items:center;gap:10px}
+#social-publishing .provider h3{margin:0;font-size:18px}
+#social-publishing .dot{width:10px;height:10px;border-radius:50%;background:#7e8cff;box-shadow:0 0 14px #7e8cff}
+#social-publishing .dot.facebook{background:#5e7cff}.dot.threads{background:#fff}.dot.youtube{background:#ff4d5e}.dot.x{background:#cfd4e8}
+#social-publishing .accounts{margin-top:15px;display:grid;gap:8px}
+#social-publishing .account{display:flex;gap:9px;align-items:center;background:#171c29;border:1px solid #2a3145;border-radius:11px;padding:8px;cursor:pointer;color:#e5e9fa}
+#social-publishing .account input{width:auto;margin:0;accent-color:#8067ff}
+#social-publishing .account small{display:block;color:#808aa6}
+#social-publishing .connect,#social-publishing .secondary,#social-publishing .primary,#social-publishing .icon,#social-publishing .cancel{border:0;border-radius:10px;padding:10px 13px;cursor:pointer}
+#social-publishing .connect,#social-publishing .secondary{background:#1a2030;color:#e5e9fa;border:1px solid #30384f}
+#social-publishing .primary{background:linear-gradient(110deg,#7454ff,#4389ff);color:white;font-weight:800}
+#social-publishing .wide{width:100%;padding:15px;font-size:16px}
+#social-publishing .panel{background:#10141e;border:1px solid #272e42;border-radius:22px;padding:24px;margin:18px 0;box-shadow:0 18px 60px #0004}
+#social-publishing .panel-head{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:20px}
+#social-publishing .panel h2{margin:5px 0 0;font-size:25px}
+#social-publishing .muted{color:#7f89a4;font-size:13px}
+#social-publishing .row,#social-publishing .form-grid{display:grid;grid-template-columns:1fr auto;gap:12px}
+#social-publishing .form-grid{grid-template-columns:repeat(3,1fr)}
+#social-publishing .form-grid.two{grid-template-columns:1fr 1fr;margin-top:18px}
+#social-publishing label{display:block;color:#aab2ca;font-size:13px;font-weight:700}
+#social-publishing input,#social-publishing select,#social-publishing textarea{width:100%;margin-top:7px;background:#0b0e16;color:#eef1ff;border:1px solid #30374c;border-radius:11px;padding:12px;font:inherit;outline:none}
+#social-publishing textarea{resize:vertical}
+#social-publishing .times{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+#social-publishing .time-row{display:flex;align-items:center;background:#171c29;border:1px solid #2a3145;border-radius:12px;padding:5px 7px 5px 11px;gap:5px}
+#social-publishing .time-row input{width:112px;margin:0;background:transparent;border:0;padding:7px}
+#social-publishing .time-row span{color:#8c96b2;font-size:12px}
+#social-publishing .icon{background:transparent;color:#9ca6c0;font-size:18px;padding:4px 7px}
+#social-publishing .inline-actions{display:flex;gap:8px;margin-top:10px}
+#social-publishing .clip-list,#social-publishing .queue{display:grid;gap:8px;margin-top:16px}
+#social-publishing .clip{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;background:#151a26;border:1px solid #282f42;border-radius:12px;padding:10px 12px;cursor:pointer;color:#eef1ff}
+#social-publishing .clip input{width:auto;margin:0}
+#social-publishing .clip small{color:#7e88a2}
+#social-publishing .status{color:#9aa4be;margin-top:12px;min-height:20px}
+#social-publishing .preview{margin:18px 0;background:#0b0f17;border:1px solid #252c3e;border-radius:14px;overflow:hidden}
+#social-publishing .preview-head{padding:12px 14px;color:#bfc7dd;border-bottom:1px solid #252c3e;font-weight:700}
+#social-publishing .preview-row{display:grid;grid-template-columns:190px 120px 1fr;gap:12px;padding:10px 14px;border-bottom:1px solid #1c2231;color:#8f99b3}
+#social-publishing .preview-row b{color:#e7ebfb}
+#social-publishing .more,#social-publishing .empty{padding:16px;color:#77819c}
+#social-publishing .queue-row{display:grid;grid-template-columns:100px 90px 1fr 230px auto;gap:10px;align-items:center;background:#151a26;border:1px solid #282f42;border-radius:12px;padding:11px}
+#social-publishing .badge{border-radius:999px;padding:4px 8px;font-size:11px;text-transform:uppercase;font-weight:800}
+#social-publishing .badge.scheduled{background:#242c45;color:#aabaff}.badge.publishing{background:#30294a;color:#c4aaff}.badge.published{background:#153a31;color:#8ce5c0}.badge.failed{background:#44242a;color:#ff9da8}.badge.cancelled{background:#2a2d35;color:#9ca3b5}
+#social-publishing .queue-row time,#social-publishing .queue-row span{color:#8c96ad}
+#social-publishing .cancel{background:#221b24;color:#ff9da8}
+#social-publishing .cancel:disabled{opacity:.35;cursor:not-allowed}
+#social-publishing .error{background:#3c2026;color:#ffabb4;padding:12px;border-radius:12px}
+#social-publishing .primary:disabled{opacity:.5;cursor:not-allowed}
+#social-publishing .social-panel{background:#10141e;border:1px solid #272e42;border-radius:22px;padding:24px;margin:18px 0;box-shadow:0 18px 60px #0004}
+#social-publishing .social-panel-head{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:20px}
+#social-publishing .social-panel h3{margin:5px 0 0;font-size:25px}
+#social-publishing .social-muted{color:#7f89a4;font-size:13px}
+#social-publishing .social-row{display:grid;grid-template-columns:1fr auto;gap:12px}
+#social-publishing .social-form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+#social-publishing .social-form-grid.social-two{grid-template-columns:1fr 1fr;margin-top:18px}
+#social-publishing .social-times{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+#social-publishing .social-inline-actions{display:flex;gap:8px;margin-top:10px}
+#social-publishing .social-clip-list,#social-publishing .social-queue{display:grid;gap:8px;margin-top:16px}
+#social-publishing .social-preview{margin:18px 0;background:#0b0f17;border:1px solid #252c3e;border-radius:14px;overflow:hidden}
+#social-publishing .social-status{color:#9aa4be;margin-top:12px;min-height:20px}
+#social-publishing .social-primary{border:0;border-radius:10px;padding:10px 13px;cursor:pointer;background:linear-gradient(110deg,#7454ff,#4389ff);color:white;font-weight:800}
+#social-publishing .social-secondary{border:1px solid #30384f;border-radius:10px;padding:10px 13px;cursor:pointer;background:#1a2030;color:#e5e9fa}
+#social-publishing .social-wide{width:100%;padding:15px;font-size:16px}
+body .topbar>a:last-child{display:none!important}
+@media(max-width:900px){#social-publishing{width:calc(100% - 24px)}#social-publishing .social-grid{grid-template-columns:repeat(2,1fr)}#social-publishing .social-form-grid,#social-publishing .social-form-grid.social-two{grid-template-columns:1fr}#social-publishing .social-hero{display:block}#social-publishing .queue-row{grid-template-columns:1fr 1fr}#social-publishing .preview-row{grid-template-columns:1fr 1fr}#social-publishing .social-row{grid-template-columns:1fr}}
+@media(max-width:560px){#social-publishing{width:calc(100% - 16px);margin-top:42px}#social-publishing .social-grid{grid-template-columns:1fr}#social-publishing .social-panel{padding:17px}#social-publishing .social-hero h2{font-size:46px}#social-publishing .queue-row{grid-template-columns:1fr}#social-publishing .preview-row{grid-template-columns:1fr}#social-publishing .social-times{display:grid;grid-template-columns:1fr}}
