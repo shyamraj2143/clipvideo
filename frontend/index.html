@@ -5,11 +5,27 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#111318" />
-    <meta name="description" content="Clip and format large videos for download." />
-    <title>ClipVideo — Video clipping workspace</title>
+    <meta name="description" content="Clip and format large videos, then schedule social publishing." />
+    <title>ClipVideo — Video clipping & social publishing</title>
+    <link rel="stylesheet" href="/social-embed.css" />
   </head>
   <body>
     <div id="root"></div>
+
+    <section id="social-publishing" class="social-embed-section" aria-labelledby="social-publishing-title">
+      <div class="social-embed-heading">
+        <div>
+          <span class="social-embed-eyebrow">CLIPVIDEO · SOCIAL PUBLISHING</span>
+          <h2 id="social-publishing-title">Schedule and publish your clips</h2>
+          <p>Keep the existing ClipVideo workflow. Use this separate section to connect social accounts, choose posts per day and exact times, write captions, and manage the server-side publishing queue.</p>
+        </div>
+        <a href="/social/" target="_blank" rel="noreferrer" class="social-embed-open">Open full Social Hub ↗</a>
+      </div>
+      <div class="social-embed-frame-wrap">
+        <iframe id="social-hub-frame" title="ClipVideo Social Publishing Hub" src="/social/?embedded=1" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
+    </section>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
